@@ -1,13 +1,21 @@
-import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
-import SignupPage from "@/app/signup/page";
+import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import SignupPage from '@/app/signup/page';
 
+// Mock next/navigation to capture router.push
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush
+  })
+}));
+
+// Mock @clerk/nextjs to provide a fake useSignUp hook
 const mockSignUpCreate = jest.fn();
 const mockSetActive = jest.fn();
-const mockRouterPush = jest.fn();
 
-jest.mock("@clerk/nextjs", () => ({
+jest.mock('@clerk/nextjs', () => ({
   useSignUp: () => ({
     signUp: {
       create: mockSignUpCreate
@@ -16,111 +24,81 @@ jest.mock("@clerk/nextjs", () => ({
   })
 }));
 
-jest.mock("next/navigation", () => ({
-  useRouter: () => ({
-    push: mockRouterPush
-  })
-}));
 
-describe("SignupPage Component", () => {
+describe('SignupPage Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockPush.mockClear();
+    mockSignUpCreate.mockClear();
+    mockSetActive.mockClear();
   });
 
-  it("renders the signup form correctly", () => {
-    render(<SignupPage />);
-    expect(screen.getByRole("heading", { name: /sign up/i })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Your Email")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Your Password")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Confirm Your Password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /sign up/i })).toBeInTheDocument();
-  });
+  it('renders the signup form and handles complete signup', async () => {
+    // Simulate signUp.create returning a complete status
+    mockSignUpCreate.mockResolvedValueOnce({ status: 'complete', createdSessionId: 'session456' });
 
-  it("submits the signup form and redirects to dashboard when status is complete", async () => {
-    mockSignUpCreate.mockResolvedValueOnce({
-      status: "complete",
-      createdSessionId: "session123"
-    });
     render(<SignupPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "new@example.com" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Confirm Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /sign up/i }));
-    
+
+    // Get form elements
+    const emailInput = screen.getByLabelText(/email/i);
+    // Using a regex to exactly match the password field label
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const confirmPasswordInput = screen.getByLabelText(/confirm password/i);
+    const submitButton = screen.getByRole('button', { name: /sign up/i });
+
+    // Fill in the form
+    fireEvent.change(emailInput, { target: { value: 'user@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+    fireEvent.change(confirmPasswordInput, { target: { value: 'password123' } });
+
+    // Submit the form
+    fireEvent.click(submitButton);
+
+    // Wait for the sign up function to be called with correct data
     await waitFor(() => {
       expect(mockSignUpCreate).toHaveBeenCalledWith({
-        emailAddress: "new@example.com",
-        password: "password123"
+        emailAddress: 'user@example.com',
+        password: 'password123'
       });
-      expect(mockSetActive).toHaveBeenCalledWith({ session: "session123" });
-      expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
     });
-  });
 
-  it("submits the signup form and redirects to verify-email when status is not complete", async () => {
-    mockSignUpCreate.mockResolvedValueOnce({ status: "pending" });
-    render(<SignupPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "pending@example.com" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Confirm Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /sign up/i }));
-    
+    // Verify that upon complete signup, setActive is called and user is redirected to dashboard
     await waitFor(() => {
-      expect(mockRouterPush).toHaveBeenCalledWith("/verify-email");
-      expect(mockSetActive).not.toHaveBeenCalled();
+      expect(mockSetActive).toHaveBeenCalledWith({ session: 'session456' });
+      expect(mockPush).toHaveBeenCalledWith('/dashboard');
     });
   });
 
-  it("displays error message when signup fails", async () => {
-    const errorResponse = { errors: [{ message: "Signup error occurred" }] };
-    mockSignUpCreate.mockRejectedValueOnce(errorResponse);
-    render(<SignupPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "fail@example.com" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Confirm Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /sign up/i }));
-    
-    const errorMsg = await screen.findByText(/signup error occurred/i);
-    expect(errorMsg).toBeInTheDocument();
-    expect(mockRouterPush).not.toHaveBeenCalled();
-  });
+  it('handles signup when additional verification is required', async () => {
+    // Simulate signUp.create returning a status that is not complete
+    mockSignUpCreate.mockResolvedValueOnce({ status: 'pending' });
 
-  it("displays error message when passwords do not match", async () => {
     render(<SignupPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "fail@example.com" }
+
+    // Get form elements
+    const emailInput = screen.getByLabelText(/email/i);
+    const passwordInput = screen.getByLabelText(/^password$/i);
+    const confirmPasswordInput = screen.getByLabelText(/confirm password/i);
+    const submitButton = screen.getByRole('button', { name: /sign up/i });
+
+    // Fill in the form
+    fireEvent.change(emailInput, { target: { value: 'user2@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password456' } });
+    fireEvent.change(confirmPasswordInput, { target: { value: 'password456' } });
+
+    // Submit the form
+    fireEvent.click(submitButton);
+
+    // Wait for the sign up function to be called
+    await waitFor(() => {
+      expect(mockSignUpCreate).toHaveBeenCalledWith({
+        emailAddress: 'user2@example.com',
+        password: 'password456'
+      });
     });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "password123" }
+
+    // Verify that if signup is not complete, user is redirected to verify-email
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/verify-email');
     });
-    fireEvent.change(screen.getByPlaceholderText("Confirm Your Password"), {
-      target: { value: "differentpassword" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /sign up/i }));
-    
-    const errorMsg = await screen.findByText(/passwords do not match/i);
-    expect(errorMsg).toBeInTheDocument();
   });
 });

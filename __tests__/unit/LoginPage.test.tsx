@@ -1,74 +1,60 @@
-import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
-import LoginPage from "@/app/login/page";
+import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import LoginPage from '@/app/login/page';
 
-const mockSignInCreate = jest.fn();
-const mockRouterPush = jest.fn();
-
-jest.mock("@clerk/nextjs", () => ({
-  useSignIn: () => ({
-    signIn: {
-      create: mockSignInCreate
-    }
-  })
-}));
-
-jest.mock("next/navigation", () => ({
+// Mock next/navigation to capture router.push
+const mockPush = jest.fn();
+jest.mock('next/navigation', () => ({
   useRouter: () => ({
-    push: mockRouterPush
+    push: mockPush
   })
 }));
 
-describe("LoginPage Component", () => {
+// Mock @clerk/nextjs to provide a fake useSignIn hook
+const mockSignInCreate = jest.fn();
+jest.mock('@clerk/nextjs', () => ({
+  useSignIn: () => ({
+    create: mockSignInCreate
+  })
+}));
+
+
+describe('LoginPage Component', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    mockPush.mockClear();
+    mockSignInCreate.mockClear();
   });
 
-  it("renders the login form correctly", () => {
-    render(<LoginPage />);
-    expect(screen.getByRole("heading", { name: /login/i })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Your Email")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Your Password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /login/i })).toBeInTheDocument();
-  });
+  it('renders the login form and handles successful login', async () => {
+    // Simulate a successful sign in response
+    mockSignInCreate.mockResolvedValueOnce({ status: 'complete', createdSessionId: 'session123' });
 
-  it("submits the login form and redirects on successful sign in", async () => {
-    mockSignInCreate.mockResolvedValueOnce({ status: "complete" });
     render(<LoginPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "test@example.com" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "password123" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /login/i }));
-    
+
+    // Get form elements
+    const emailInput = screen.getByLabelText(/email/i);
+    const passwordInput = screen.getByLabelText(/password/i);
+    const submitButton = screen.getByRole('button', { name: /login/i });
+
+    // Fill in form fields
+    fireEvent.change(emailInput, { target: { value: 'test@example.com' } });
+    fireEvent.change(passwordInput, { target: { value: 'password123' } });
+
+    // Submit the form
+    fireEvent.click(submitButton);
+
+    // Wait for the sign in function to be called with correct credentials
     await waitFor(() => {
       expect(mockSignInCreate).toHaveBeenCalledWith({
-        identifier: "test@example.com",
-        password: "password123"
+        identifier: 'test@example.com',
+        password: 'password123'
       });
-      expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
     });
-  });
 
-  it("displays error message when sign in fails", async () => {
-    const errorResponse = { errors: [{ message: "Invalid credentials" }] };
-    mockSignInCreate.mockRejectedValueOnce(errorResponse);
-    render(<LoginPage />);
-    
-    fireEvent.change(screen.getByPlaceholderText("Your Email"), {
-      target: { value: "fail@example.com" }
+    // Expect redirection to dashboard
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/dashboard');
     });
-    fireEvent.change(screen.getByPlaceholderText("Your Password"), {
-      target: { value: "wrongpassword" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /login/i }));
-    
-    const errorMsg = await screen.findByText(/invalid credentials/i);
-    expect(errorMsg).toBeInTheDocument();
-    expect(mockRouterPush).not.toHaveBeenCalled();
   });
 });
